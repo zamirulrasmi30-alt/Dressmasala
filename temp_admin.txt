@@ -1,0 +1,1052 @@
+﻿// Admin Dashboard â€” luxury analytics UI (Shopify/Stripe style).
+// Glassmorphism panels, metallic metrics, trend pills, SVG iconography.
+// Sidebar: Overview | Manage Dresses | Orders | Subscribers | Back to Website.
+// - Overview: revenue / active orders / inventory / subscriber metric cards,
+//   7-day revenue bars, low-stock alerts, recent orders.
+// - Products: full CRUD (title, price, MRP, category, image URL or file
+//   upload, description, stock, badge) synced through GAS_ENDPOINT.
+// - Orders / Subscribers: live tables from the GAS backend (fallback local).
+import React, { useMemo, useState } from 'react';
+import { COLOR_OPTIONS, COLOR_FILTERS, TYPE_OPTIONS, getImages, firstImage, PLACEHOLDER_IMG } from '../data/products.js';
+import { computeOverview, fileToDataUrl, inr, validateProduct } from '../services/api.js';
+import { customerWaLink } from '../services/order.js';
+import './Admin.css';
+
+const TABS = [
+  { id: 'overview', label: 'Dashboard Overview' },
+  { id: 'products', label: 'Manage Dresses' },
+  { id: 'orders', label: 'Orders' },
+  { id: 'subscribers', label: 'Subscribers' },
+];
+
+// Minimal stroke icons in soft gold â€” sidebar + metric cards.
+const STROKE = {
+  fill: 'none',
+  stroke: 'currentColor',
+  strokeWidth: 1.6,
+  strokeLinecap: 'round',
+  strokeLinejoin: 'round',
+};
+const TAB_ICONS = {
+  overview: (
+    <svg viewBox="0 0 24 24" {...STROKE}>
+      <rect x="3" y="3" width="7" height="7" rx="1.5" />
+      <rect x="14" y="3" width="7" height="7" rx="1.5" />
+      <rect x="3" y="14" width="7" height="7" rx="1.5" />
+      <rect x="14" y="14" width="7" height="7" rx="1.5" />
+    </svg>
+  ),
+  products: (
+    <svg viewBox="0 0 24 24" {...STROKE}>
+      <path d="M6 8h12l-1 12H7L6 8z" />
+      <path d="M9 8V6a3 3 0 016 0v2" />
+    </svg>
+  ),
+  orders: (
+    <svg viewBox="0 0 24 24" {...STROKE}>
+      <path d="M21 8l-9-5-9 5v8l9 5 9-5V8z" />
+      <path d="M3.5 8.5L12 13l8.5-4.5M12 13v8" />
+    </svg>
+  ),
+  subscribers: (
+    <svg viewBox="0 0 24 24" {...STROKE}>
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <path d="M3.5 7l8.5 6 8.5-6" />
+    </svg>
+  ),
+};
+const METRIC_ICONS = {
+  revenue: (
+    <svg viewBox="0 0 24 24" {...STROKE}>
+      <path d="M3 17l6-6 4 4 8-8" />
+      <path d="M15 7h6v6" />
+    </svg>
+  ),
+  orders: (
+    <svg viewBox="0 0 24 24" {...STROKE}>
+      <path d="M21 8l-9-5-9 5v8l9 5 9-5V8z" />
+      <path d="M3.5 8.5L12 13l8.5-4.5M12 13v8" />
+    </svg>
+  ),
+  inventory: (
+    <svg viewBox="0 0 24 24" {...STROKE}>
+      <path d="M20.6 13.4L11 3.8A2 2 0 009.6 3.2H4a1 1 0 00-1 1v5.6c0 .5.2 1 .6 1.4l9.6 9.6a2 2 0 002.8 0l4.6-4.6a2 2 0 000-2.8z" />
+      <circle cx="7.5" cy="7.5" r="1.4" />
+    </svg>
+  ),
+  subscribers: (
+    <svg viewBox="0 0 24 24" {...STROKE}>
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <path d="M3.5 7l8.5 6 8.5-6" />
+    </svg>
+  ),
+};
+
+// Date-range selector: Today / Yesterday / Last 7 Days / All + custom
+// Fromâ€“To calendar inputs. Rendered above Overview metrics and Orders.
+function DateFilterBar({ preset, from, to, onPreset, onFrom, onTo }) {
+  const presets = [
+    { id: 'today', label: 'Today' },
+    { id: 'yesterday', label: 'Yesterday' },
+    { id: 'week', label: 'Last 7 Days' },
+    { id: 'all', label: 'All' },
+  ];
+  return (
+    <div className="ad-datebar" role="group" aria-label="Filter by date">
+      <span className="ad-date-ico" aria-hidden>
+        ðŸ“…
+      </span>
+      {presets.map((p) => (
+        <button
+          key={p.id}
+          className={`ad-chip${preset === p.id ? ' active' : ''}`}
+          onClick={() => onPreset(p.id)}
+        >
+          {p.label}
+        </button>
+      ))}
+      <span className="ad-date-sep" aria-hidden />
+      <label className="ad-date-field">
+        Custom Date
+        <span>
+          <input
+            type="date"
+            value={from}
+            max={to || undefined}
+            onChange={(e) => onFrom(e.target.value)}
+            aria-label="From date"
+          />
+          <em>â†’</em>
+          <input
+            type="date"
+            value={to}
+            min={from || undefined}
+            onChange={(e) => onTo(e.target.value)}
+            aria-label="To date"
+          />
+        </span>
+      </label>
+    </div>
+  );
+}
+
+const EMPTY_FORM = {
+  name: '',
+  price: '',
+  mrp: '',
+  category: '',
+  color: '',
+  sku: '',
+  images: ['', '', ''],
+  description: '',
+  stock: '10',
+  badge: '',
+  rating: '4.5',
+};
+
+// ---------- Date filtering ----------
+// Sheets locale is DD/MM/YYYY, but GAS may also return ISO strings â€”
+// orderDayKey() normalises every supported shape to a local YYYY-MM-DD
+// key so exact-date and range comparisons are simple string compares.
+const toDayKey = (d) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
+    d.getDate()
+  ).padStart(2, '0')}`;
+
+const orderDayKey = (o) => {
+  const v = o?.date;
+  if (!v) return '';
+  if (typeof v === 'string') {
+    const iso = v.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+    // DD/MM/YYYY or DD-MM-YYYY (also tolerates 2-digit year).
+    const dmy = v.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/);
+    if (dmy) {
+      let [, d, mo, y] = dmy;
+      if (y.length === 2) y = '20' + y;
+      return `${y}-${mo.padStart(2, '0')}-${d.padStart(2, '0')}`;
+    }
+  }
+  const t = new Date(v).getTime();
+  if (Number.isNaN(t)) return '';
+  return toDayKey(new Date(t));
+};
+
+const fmtDay = (key) => {
+  const m = String(key).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return key;
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).toLocaleDateString(
+    'en-IN',
+    { day: 'numeric', month: 'short' }
+  );
+};
+
+export default function AdminDashboard({
+  products,
+  orders,
+  subscribers,
+  source,
+  loading,
+  onCreate,
+  onUpdate,
+  onDelete,
+  onRefresh,
+  onExit,
+  onLogout = () => {},
+}) {
+  const [tab, setTab] = useState('overview');
+  const [query, setQuery] = useState('');
+  const [showForm, setShowForm] = useState(false);
+  const [editing, setEditing] = useState(null); // product or null
+  const [form, setForm] = useState(EMPTY_FORM);
+  const [formErr, setFormErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState('');
+  const [sideOpen, setSideOpen] = useState(false);
+
+  // Date filter: preset id + inclusive YYYY-MM-DD bounds. 'all' = no filter.
+  const [preset, setPreset] = useState('all');
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+
+  const applyPreset = (p) => {
+    const now = new Date();
+    setPreset(p);
+    if (p === 'today') {
+      const k = toDayKey(now);
+      setFrom(k);
+      setTo(k);
+    } else if (p === 'yesterday') {
+      const k = toDayKey(new Date(now.getTime() - 86400000));
+      setFrom(k);
+      setTo(k);
+    } else if (p === 'week') {
+      setFrom(toDayKey(new Date(now.getTime() - 6 * 86400000)));
+      setTo(toDayKey(now));
+    } else {
+      setFrom('');
+      setTo('');
+    }
+  };
+
+  // Orders visible under the active date filter (auto-swaps flipped bounds).
+  const visibleOrders = useMemo(() => {
+    if (preset === 'all' || !from || !to) return orders;
+    const [a, b] = from <= to ? [from, to] : [to, from];
+    return orders.filter((o) => {
+      const k = orderDayKey(o);
+      return k && k >= a && k <= b;
+    });
+  }, [orders, preset, from, to]);
+
+  const rangeLabel =
+    preset === 'all' ? '' : from === to ? fmtDay(from) : `${fmtDay(from)} â€“ ${fmtDay(to)}`;
+
+  const stats = useMemo(
+    () => computeOverview(products, orders, subscribers),
+    [products, orders, subscribers]
+  );
+
+  // Week-over-week trends (last 7 days vs the 7 before) for the
+  // glowing pills beside Revenue and Orders.
+  const trends = useMemo(() => {
+    const now = Date.now();
+    const W = 7 * 86400000;
+    const inRange = (o, from, to) => {
+      const t = new Date(o.date).getTime();
+      return !Number.isNaN(t) && t >= from && t < to;
+    };
+    const cur = orders.filter((o) => inRange(o, now - W, now));
+    const prev = orders.filter((o) => inRange(o, now - 2 * W, now - W));
+    const revenue = (arr) => arr.reduce((s, o) => s + (Number(o.total) || 0), 0);
+    const pct = (c, p) => {
+      if (p > 0) return ((c - p) / p) * 100;
+      return c > 0 ? 100 : NaN;
+    };
+    return { revPct: pct(revenue(cur), revenue(prev)), ordPct: pct(cur.length, prev.length) };
+  }, [orders]);
+
+  const trendPill = (pctValue) => {
+    if (!Number.isFinite(pctValue)) {
+      return <span className="trend flat">Â· steady</span>;
+    }
+    const up = pctValue >= 0;
+    return (
+      <span className={`trend ${up ? 'up' : 'down'}`}>
+        {up ? 'â–²' : 'â–¼'} {Math.abs(pctValue).toFixed(1)}% this week
+      </span>
+    );
+  };
+
+  // Metrics follow the date filter: revenue / active / totals recompute
+  // from visibleOrders while inventory + subscribers stay global.
+  const viewStats = useMemo(
+    () =>
+      preset === 'all' ? stats : computeOverview(products, visibleOrders, subscribers),
+    [preset, stats, products, visibleOrders, subscribers]
+  );
+
+  const flash = (msg) => {
+    setNotice(msg);
+    window.clearTimeout(flash._t);
+    flash._t = window.setTimeout(() => setNotice(''), 2600);
+  };
+
+  // Last-7-days revenue bars for the mini chart.
+  const bars = useMemo(() => {
+    const days = [...Array(7)].map((_, i) => {
+      const d = new Date();
+      d.setDate(d.getDate() - (6 - i));
+      return { key: d.toISOString().slice(0, 10), label: d.toLocaleDateString('en-IN', { weekday: 'short' }), total: 0 };
+    });
+    orders.forEach((o) => {
+      const k = String(o.date || '').slice(0, 10);
+      const b = days.find((d) => d.key === k);
+      if (b) b.total += Number(o.total) || 0;
+    });
+    const max = Math.max(1, ...days.map((d) => d.total));
+    return days.map((d) => ({ ...d, h: Math.round((d.total / max) * 100) }));
+  }, [orders]);
+
+  const filteredProducts = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return products;
+    return products.filter((p) =>
+      `${p.name} ${p.category} ${p.id} ${p.sku || ''} ${p.color || ''}`.toLowerCase().includes(q)
+    );
+  }, [products, query]);
+
+  // Exact SKU lookup (e.g. ZAR-WHT-01) â†’ instant result popup card.
+  const skuHit = useMemo(() => {
+    const q = query.trim().toUpperCase();
+    if (!q) return null;
+    return products.find((p) => String(p.sku || '').toUpperCase() === q) || null;
+  }, [products, query]);
+
+  /* ---------- form handlers ---------- */
+
+  const openAdd = () => {
+    setEditing(null);
+    setForm(EMPTY_FORM);
+    setFormErr('');
+    setShowForm(true);
+  };
+
+  const openEdit = (p) => {
+    setEditing(p);
+    setForm({
+      name: p.name, price: String(p.price), mrp: String(p.mrp ?? ''),
+      category: p.category, color: p.color ?? '', sku: p.sku ?? '',
+      images: [...getImages(p), '', '', ''].slice(0, 3),
+      description: p.description ?? '',
+      stock: String(p.stock ?? 0), badge: p.badge ?? '', rating: String(p.rating ?? 4.5),
+    });
+    setFormErr('');
+    setShowForm(true);
+  };
+
+  const setImageAt = (i, val) =>
+    setForm((f) => {
+      const cur = Array.isArray(f.images) ? f.images : ['', '', ''];
+      return { ...f, images: [0, 1, 2].map((j) => (j === i ? val : cur[j] || '')) };
+    });
+
+  // Multi-file upload: fills the first empty views in order (max 3 views).
+  const onFiles = async (e) => {
+    const files = [...(e.target.files || [])].slice(0, 3);
+    if (!files.length) return;
+    try {
+      const urls = [];
+      for (const file of files) urls.push(await fileToDataUrl(file));
+      let placed = 0;
+      setForm((f) => {
+        const next = [0, 1, 2].map((j) =>
+          String((Array.isArray(f.images) ? f.images[j] : '') || '')
+        );
+        urls.forEach((url) => {
+          const slot = next.findIndex((s) => !String(s).trim());
+          if (slot !== -1) {
+            next[slot] = url;
+            placed += 1;
+          }
+        });
+        return { ...f, images: next.slice(0, 3) };
+      });
+      flash(
+        placed
+          ? `${placed} image${placed > 1 ? 's' : ''} attached.`
+          : 'All 3 views are full â€” remove one to add more.'
+      );
+    } catch (err) {
+      setFormErr(err.message);
+    }
+    e.target.value = '';
+  };
+
+  const submitForm = async (e) => {
+    e.preventDefault();
+    const err = validateProduct(form);
+    if (err) {
+      setFormErr(err);
+      return;
+    }
+    setBusy(true);
+    try {
+      // Explicit 3-view payload: trimmed per-slot array PLUS the
+      // comma-joined transport string, so View 2/3 can never be stripped
+      // between the form, the api layer and GAS â€” whichever shape the
+      // backend stores, all 3 views survive the round trip.
+      const views = [0, 1, 2].map((i) => String(form.images?.[i] || '').trim());
+      const payload = {
+        ...form,
+        images: views.filter(Boolean),
+        image: views.filter(Boolean).join(','),
+      };
+      if (editing) {
+        await onUpdate(editing.id, payload);
+        flash(`â€œ${form.name}â€ updated â™›`);
+      } else {
+        await onCreate(payload);
+        flash(`â€œ${form.name}â€ added to catalog â™›`);
+      }
+      setShowForm(false);
+    } catch (ex) {
+      setFormErr(ex.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const askDelete = async (p) => {
+    if (!window.confirm(`Delete â€œ${p.name}â€ permanently?`)) return;
+    await onDelete(p.id);
+    flash(`â€œ${p.name}â€ deleted.`);
+  };
+
+  const goTab = (id) => {
+    setTab(id);
+    setSideOpen(false);
+  };
+
+  /* ---------- render ---------- */
+
+  return (
+    <div className="admin">
+      <div className="ad-ambient" aria-hidden="true" />
+      {sideOpen && <div className="ad-scrim" onClick={() => setSideOpen(false)} />}
+
+      {/* Sidebar */}
+      <aside className={`ad-side ${sideOpen ? 'open' : ''}`} aria-label="Admin navigation">
+        <div className="ad-brand">
+          â™› ZAREEF<small>ADMIN</small>
+        </div>
+        <p className="ad-nav-label">Manage</p>
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            className={`ad-link ${tab === t.id ? 'active' : ''}`}
+            onClick={() => goTab(t.id)}
+          >
+            <span className="ico">{TAB_ICONS[t.id]}</span> {t.label}
+          </button>
+        ))}
+        <button className="ad-link back" onClick={onExit}>
+          â† Back to Website
+        </button>
+        <p className="ad-src">
+          <span className={`ad-dot ${source === 'gas' ? 'live' : ''}`} />
+          {source === 'gas' ? 'Live Â· Google Sheets' : 'Local mode Â· connect GAS'}
+        </p>
+      </aside>
+
+      {/* Main */}
+      <div className="ad-main">
+        <div className="ad-top">
+          <button className="ad-hamburger" aria-label="Open menu" onClick={() => setSideOpen(true)}>
+            â˜°
+          </button>
+          <div>
+            <h1>
+              {tab === 'overview' && 'Dashboard Overview'}
+              {tab === 'products' && 'Manage Dresses'}
+              {tab === 'orders' && 'Orders'}
+              {tab === 'subscribers' && 'Subscribers'}
+            </h1>
+            <p>
+              {loading
+                ? 'Syncing with Google Sheetsâ€¦'
+                : `${products.length} products Â· ${orders.length} orders Â· ${subscribers.length} subscribers`}
+            </p>
+          </div>
+          <div className="ad-search">
+            {(tab === 'products' || tab === 'orders') && (
+              <input
+                placeholder={tab === 'products' ? 'Search products or SKUâ€¦' : 'Search ordersâ€¦'}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                aria-label="Search"
+              />
+            )}
+            <button className="ad-btn ghost" onClick={onRefresh}>
+              âŸ³ Refresh
+            </button>
+            <button className="ad-btn danger" onClick={onLogout} title="Log out and return home">
+              â» Logout
+            </button>
+            {tab === 'products' && (
+              <button className="ad-btn" onClick={openAdd}>
+                + Add Product
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Date filter â€” drives Overview metrics + Orders list */}
+        {(tab === 'overview' || tab === 'orders') && (
+          <DateFilterBar
+            preset={preset}
+            from={from}
+            to={to}
+            onPreset={applyPreset}
+            onFrom={(v) => {
+              setFrom(v);
+              setPreset('custom');
+            }}
+            onTo={(v) => {
+              setTo(v);
+              setPreset('custom');
+            }}
+          />
+        )}
+
+        {/* ===== OVERVIEW ===== */}
+        {tab === 'overview' && (
+          <>
+            <div className="ad-cards">
+              <div className="ad-card">
+                <span>Total Revenue</span>
+                <strong>{inr(viewStats.revenue)}</strong>
+                <div className="trend-row">
+                  {preset === 'all' ? (
+                    trendPill(trends.revPct)
+                  ) : (
+                    <span className="trend gold">â—· {rangeLabel}</span>
+                  )}
+                  <em>
+                    {viewStats.totalOrders} order{viewStats.totalOrders === 1 ? '' : 's'}
+                    {preset === 'all' ? ' lifetime' : ' in period'}
+                  </em>
+                </div>
+                <span className="ad-metric-ico">{METRIC_ICONS.revenue}</span>
+              </div>
+              <div className="ad-card">
+                <span>Active Orders</span>
+                <strong>{viewStats.activeOrders}</strong>
+                <div className="trend-row">
+                  {preset === 'all' ? (
+                    trendPill(trends.ordPct)
+                  ) : (
+                    <span className="trend gold">â—· {rangeLabel}</span>
+                  )}
+                  <em>processing / shipped</em>
+                </div>
+                <span className="ad-metric-ico">{METRIC_ICONS.orders}</span>
+              </div>
+              <div className="ad-card">
+                <span>Inventory</span>
+                <strong>{stats.productCount}</strong>
+                <em>{stats.units} units in stock</em>
+                <span className="ad-metric-ico">{METRIC_ICONS.inventory}</span>
+              </div>
+              <div className="ad-card">
+                <span>Subscribers</span>
+                <strong>{stats.subscriberCount}</strong>
+                <em>newsletter signups</em>
+                <span className="ad-metric-ico">{METRIC_ICONS.subscribers}</span>
+              </div>
+            </div>
+
+            <div className="ad-panels">
+              <div className="ad-panel">
+                <h3>Revenue â€” last 7 days</h3>
+                <div className="ad-bars">
+                  {bars.map((b) => (
+                    <div className="ad-bar" key={b.key} title={`${b.label}: ${inr(b.total)}`}>
+                      <i style={{ height: `${Math.max(4, b.h)}%` }} />
+                      <small>{b.label}</small>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="ad-panel">
+                <h3>âš  Low stock (â‰¤ 5)</h3>
+                {stats.lowStock.length === 0 ? (
+                  <p style={{ color: 'var(--ad-muted)', fontSize: '.88rem' }}>
+                    All stocked up â€” nothing running low. â™›
+                  </p>
+                ) : (
+                  <ul className="ad-low">
+                    {stats.lowStock.slice(0, 5).map((p) => (
+                      <li key={p.id}>
+                        <img src={firstImage(p)} alt="" />
+                        <span>
+                          <strong>{p.name}</strong>
+                          <br />
+                          <small style={{ color: 'var(--ad-muted)' }}>{p.category}</small>
+                        </span>
+                        <span className="stock-pill">{p.stock} left</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+
+            <div className="ad-table-wrap">
+              <div className="ad-table-scroll">
+                <table className="ad-table">
+                  <thead>
+                    <tr>
+                      <th>Recent orders</th>
+                      <th>Customer</th>
+                      <th>Total</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visibleOrders.slice(0, 5).map((o) => (
+                      <tr key={o.orderId}>
+                        <td>
+                          <strong>{o.orderId}</strong>
+                          <br />
+                          <small style={{ color: 'var(--ad-muted)' }}>{o.items}</small>
+                        </td>
+                        <td>{o.name}</td>
+                        <td>{inr(o.total)}</td>
+                        <td>
+                          <span className={`status-pill ${o.status}`}>{o.status}</span>
+                        </td>
+                      </tr>
+                    ))}
+                    {visibleOrders.length === 0 && (
+                      <tr>
+                        <td colSpan={4} className="ad-empty">
+                          No orders received on this date.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* ===== PRODUCTS ===== */}
+        {tab === 'products' && (
+          <>
+            {/* Instant SKU result popup: image, name, price, stock */}
+            {skuHit && (
+              <div className="sku-hit" role="status">
+                <img src={firstImage(skuHit)} alt="" />
+                <div className="sku-hit-info">
+                  <strong>{skuHit.name}</strong>
+                  <small>
+                    {skuHit.sku} Â· {inr(skuHit.price)} Â·{' '}
+                    <span className={Number(skuHit.stock) <= 5 ? 'low' : ''}>
+                      {skuHit.stock} in stock
+                    </span>
+                  </small>
+                </div>
+                <div className="row-actions">
+                  <button
+                    onClick={() => {
+                      openEdit(skuHit);
+                      setQuery('');
+                    }}
+                  >
+                    Edit
+                  </button>
+                  <button className="del" onClick={() => setQuery('')}>
+                    Clear
+                  </button>
+                </div>
+              </div>
+            )}
+            <div className="ad-table-wrap">
+            <div className="ad-table-scroll">
+              <table className="ad-table">
+                <thead>
+                  <tr>
+                    <th>Product</th>
+                    <th>Category</th>
+                    <th>Color</th>
+                    <th>Price</th>
+                    <th>Stock</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredProducts.map((p) => (
+                    <tr key={p.id}>
+                      <td>
+                        <div className="ad-prod">
+                          <img src={firstImage(p)} alt="" loading="lazy" />
+                          <span>
+                            <strong>{p.name}</strong>
+                            <small>
+                              {p.id}
+                              {p.sku ? ` Â· ${p.sku}` : ''}
+                            </small>
+                          </span>
+                        </div>
+                      </td>
+                      <td>{p.category}</td>
+                      <td>
+                        {(() => {
+                          const hex =
+                            COLOR_FILTERS.find(
+                              (c) => c.title.toLowerCase() === String(p.color || '').toLowerCase()
+                            )?.hex || '#666';
+                          return p.color ? (
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                              <span
+                                style={{
+                                  width: 16, height: 16, borderRadius: '50%',
+                                  background: hex, border: '1px solid rgba(255,255,255,.4)',
+                                  display: 'inline-block',
+                                }}
+                              />
+                              {p.color}
+                            </span>
+                          ) : (
+                            <span style={{ color: 'var(--ad-muted)' }}>â€”</span>
+                          );
+                        })()}
+                      </td>
+                      <td>
+                        {inr(p.price)}{' '}
+                        <small style={{ color: 'var(--ad-muted)' }}>
+                          <s>{inr(p.mrp)}</s>
+                        </small>
+                      </td>
+                      <td>{p.stock}</td>
+                      <td>
+                        <div className="row-actions">
+                          <button onClick={() => openEdit(p)}>Edit</button>
+                          <button className="del" onClick={() => askDelete(p)}>
+                            Delete
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {filteredProducts.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="ad-empty">
+                        No products match â€œ{query}â€.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          </>
+        )}
+
+        {/* ===== ORDERS ===== */}
+        {tab === 'orders' && (
+          <div className="ad-table-wrap">
+            <div className="ad-table-scroll">
+              <table className="ad-table">
+                <thead>
+                  <tr>
+                    <th>Order</th>
+                    <th>Date</th>
+                    <th>Customer</th>
+                    <th>Total</th>
+                    <th>Status</th>
+                    <th>Notify</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visibleOrders
+                    .filter((o) =>
+                      `${o.orderId} ${o.name} ${o.phone}`.toLowerCase().includes(query.toLowerCase())
+                    )
+                    .map((o) => (
+                      <tr key={o.orderId}>
+                        <td>
+                          <strong>{o.orderId}</strong>
+                          <br />
+                          <small style={{ color: 'var(--ad-muted)' }}>{o.items}</small>
+                        </td>
+                        <td>{new Date(o.date).toLocaleDateString('en-IN')}</td>
+                        <td>
+                          {o.name}
+                          <br />
+                          <small style={{ color: 'var(--ad-muted)' }}>{o.phone}</small>
+                        </td>
+                        <td>{inr(o.total)}</td>
+                        <td>
+                          <span className={`status-pill ${o.status}`}>{o.status}</span>
+                        </td>
+                        <td>
+                          {(() => {
+                            const link = customerWaLink(o);
+                            return link ? (
+                              <button
+                                className="wa-btn"
+                                title={`Notify ${o.name} on WhatsApp`}
+                                onClick={() => window.open(link, '_blank', 'noopener')}
+                              >
+                                ðŸ’¬ Notify
+                              </button>
+                            ) : (
+                              <span style={{ color: 'var(--ad-muted)', fontSize: '.8rem' }}>
+                                No phone
+                              </span>
+                            );
+                          })()}
+                        </td>
+                      </tr>
+                    ))}
+                  {visibleOrders.length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="ad-empty">
+                        No orders received on this date.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* ===== SUBSCRIBERS ===== */}
+        {tab === 'subscribers' && (
+          <div className="ad-table-wrap">
+            <div className="ad-table-scroll">
+              <table className="ad-table">
+                <thead>
+                  <tr>
+                    <th>Email</th>
+                    <th>Subscribed on</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {subscribers.map((s, i) => (
+                    <tr key={`${s.email}-${i}`}>
+                      <td>{s.email}</td>
+                      <td>
+                        {s.date ? new Date(s.date).toLocaleDateString('en-IN') : 'â€”'}
+                      </td>
+                    </tr>
+                  ))}
+                  {subscribers.length === 0 && (
+                    <tr>
+                      <td colSpan={2} className="ad-empty">
+                        No subscribers yet â€” newsletter signups appear here live.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Product add/edit modal */}
+      {showForm && (
+        <div className="ad-modal-back" onClick={() => !busy && setShowForm(false)}>
+          <div className="ad-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label={editing ? 'Edit product' : 'Add product'}>
+            <h2>{editing ? 'Edit Product' : 'Add New Product'}</h2>
+            <p>Synced to Google Sheets via GAS_ENDPOINT{source === 'gas' ? ' (live)' : ' (local mode â€” connect GAS to sync)'}.</p>
+            {formErr && <p className="ad-form-err">{formErr}</p>}
+            <form onSubmit={submitForm}>
+              <div className="ad-form-grid">
+                <div className="ad-field full">
+                  <label htmlFor="pf-title">Title *</label>
+                  <input
+                    id="pf-title"
+                    value={form.name}
+                    onChange={(e) => setForm({ ...form, name: e.target.value })}
+                    placeholder="e.g. Banarasi Silk Saree"
+                  />
+                </div>
+                <div className="ad-field">
+                  <label htmlFor="pf-price">Price (â‚¹) *</label>
+                  <input
+                    id="pf-price"
+                    type="number"
+                    min="1"
+                    value={form.price}
+                    onChange={(e) => setForm({ ...form, price: e.target.value })}
+                    placeholder="999"
+                  />
+                </div>
+                <div className="ad-field">
+                  <label htmlFor="pf-mrp">MRP (â‚¹)</label>
+                  <input
+                    id="pf-mrp"
+                    type="number"
+                    min="0"
+                    value={form.mrp}
+                    onChange={(e) => setForm({ ...form, mrp: e.target.value })}
+                    placeholder="1499"
+                  />
+                </div>
+                <div className="ad-field">
+                  <label htmlFor="pf-cat">Type / Category *</label>
+                  <select
+                    id="pf-cat"
+                    value={TYPE_OPTIONS.includes(form.category) ? form.category : ''}
+                    onChange={(e) => setForm({ ...form, category: e.target.value })}
+                    required
+                  >
+                    <option value="">â€” Select type â€”</option>
+                    <option value="T-Shirt">T-Shirt (Standard Fit)</option>
+                    <option value="Oversized">Oversized</option>
+                  </select>
+                </div>
+                <div className="ad-field">
+                  <label htmlFor="pf-stock">Stock *</label>
+                  <input
+                    id="pf-stock"
+                    type="number"
+                    min="0"
+                    value={form.stock}
+                    onChange={(e) => setForm({ ...form, stock: e.target.value })}
+                  />
+                </div>
+                <div className="ad-field">
+                  <label htmlFor="pf-color">Color *</label>
+                  <select
+                    id="pf-color"
+                    value={form.color}
+                    onChange={(e) => setForm({ ...form, color: e.target.value })}
+                    required
+                  >
+                    <option value="">â€” Select color â€”</option>
+                    {COLOR_OPTIONS.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="ad-field full">
+                  <label>Images * â€” Main, Design Detail, Logo / Tag</label>
+                  {['Main Image URL (1st View) *', 'Design Detail Image URL (2nd View)', 'Logo / Tag Image URL (3rd View)'].map(
+                    (label, i) => (
+                      <span key={label} className="ad-img-row" style={{ marginBottom: 10 }}>
+                        {(form.images[i] || '').trim() ? (
+                          <img
+                            className="ad-img-preview"
+                            src={form.images[i]}
+                            alt={`Preview view ${i + 1}`}
+                            onError={(e) => {
+                              // Preview-only swap (typed URL kept) â€” loop-guarded.
+                              if (!e.currentTarget.src.includes('photo-1521572267360')) {
+                                e.currentTarget.src = PLACEHOLDER_IMG;
+                              }
+                            }}
+                          />
+                        ) : (
+                          <span className="ad-img-preview" />
+                        )}
+                        <span style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                          <input
+                            value={(form.images[i] || '').startsWith('data:') ? '' : form.images[i] || ''}
+                            onChange={(e) => setImageAt(i, e.target.value)}
+                            placeholder={label}
+                            aria-label={label}
+                          />
+                          {(form.images[i] || '').trim() ? (
+                            <button
+                              type="button"
+                              className="ad-btn ghost"
+                              style={{ alignSelf: 'flex-start', padding: '8px 14px' }}
+                              onClick={() => setImageAt(i, '')}
+                            >
+                              Remove view {i + 1}
+                            </button>
+                          ) : null}
+                        </span>
+                      </span>
+                    )
+                  )}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    onChange={onFiles}
+                    aria-label="Upload image files (fills empty views in order)"
+                  />
+                </div>
+                <div className="ad-field full">
+                  <label htmlFor="pf-desc">Description</label>
+                  <textarea
+                    id="pf-desc"
+                    value={form.description}
+                    onChange={(e) => setForm({ ...form, description: e.target.value })}
+                    placeholder="Fabric, fit, careâ€¦"
+                  />
+                </div>
+                <div className="ad-field">
+                  <label htmlFor="pf-badge">Badge</label>
+                  <input
+                    id="pf-badge"
+                    value={form.badge}
+                    onChange={(e) => setForm({ ...form, badge: e.target.value })}
+                    placeholder="New / Best Sellerâ€¦"
+                  />
+                </div>
+                <div className="ad-field">
+                  <label htmlFor="pf-rating">Rating</label>
+                  <input
+                    id="pf-rating"
+                    type="number"
+                    min="1"
+                    max="5"
+                    step="0.1"
+                    value={form.rating}
+                    onChange={(e) => setForm({ ...form, rating: e.target.value })}
+                  />
+                </div>
+                <div className="ad-field">
+                  <label htmlFor="pf-sku">SKU (auto if empty)</label>
+                  <input
+                    id="pf-sku"
+                    value={form.sku}
+                    onChange={(e) => setForm({ ...form, sku: e.target.value.toUpperCase() })}
+                    placeholder="e.g. ZAR-RED-03"
+                  />
+                </div>
+              </div>
+              <div className="ad-modal-actions">
+                <button
+                  type="button"
+                  className="ad-btn ghost"
+                  disabled={busy}
+                  onClick={() => setShowForm(false)}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="ad-btn" disabled={busy}>
+                  {busy ? 'Savingâ€¦' : editing ? 'Save Changes' : 'Add Product'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {notice && <div className="ad-toast" role="status">{notice}</div>}
+    </div>
+  );
+}
+

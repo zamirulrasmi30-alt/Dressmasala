@@ -1,0 +1,275 @@
+// ------------------------------------------------------------------
+// Fallback catalog — shown instantly while the GAS backend loads,
+// and used offline if the GAS endpoint is not configured yet.
+// Keep field names 1:1 with the Google Sheet columns (see gas/Code.gs).
+// Image URLs use Unsplash (free) so the project runs with zero assets.
+// ------------------------------------------------------------------
+
+export const FALLBACK_PRODUCTS = [
+  {
+    id: 'DM-001',
+    sku: 'ZAR-RED-01',
+    name: 'Passion Rose Graphic Tee',
+    category: 'T-Shirts',
+    price: 799,
+    mrp: 1299,
+    rating: 4.8,
+    badge: 'Best Seller',
+    image:
+      'https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?w=700&q=80&auto=format&fit=crop',
+    description: 'Premium cotton tee with vibrant rose graphic. Everyday comfort fit.',
+    color: 'Red',
+    stock: 42,
+  },
+  {
+    id: 'DM-002',
+    sku: 'ZAR-WHT-01',
+    name: 'Everyday Essential White Tee',
+    category: 'T-Shirts',
+    price: 499,
+    mrp: 899,
+    rating: 4.6,
+    badge: 'New',
+    image:
+      'https://images.unsplash.com/photo-1583743814966-8936f5b7be1a?w=700&q=80&auto=format&fit=crop',
+    description: 'Heavyweight 220 GSM pure-cotton white tee. Made for your everyday journey.',
+    color: 'White',
+    stock: 60,
+  },
+  {
+    id: 'DM-003',
+    sku: 'ZAR-OVR-01',
+    name: 'Urban Street Oversized Tee',
+    category: 'Oversized',
+    price: 899,
+    mrp: 1399,
+    rating: 4.7,
+    badge: 'Trending',
+    image:
+      'https://images.unsplash.com/photo-1503341504253-dff4815485f1?w=700&q=80&auto=format&fit=crop',
+    description: 'Drop-shoulder oversized fit with boxy streetwear silhouette.',
+    color: 'Black',
+    stock: 35,
+  },
+  {
+    id: 'DM-004',
+    sku: 'ZAR-MRN-01',
+    name: 'Heritage Kurta — Sandalwood',
+    category: 'Ethnic',
+    category: 'Ethnic',
+    price: 1499,
+    mrp: 2299,
+    rating: 4.9,
+    badge: 'Premium',
+    image:
+      'https://images.unsplash.com/photo-1597983073493-88cd35cf93b0?w=700&q=80&auto=format&fit=crop',
+    description: 'Hand-finished festive kurta in warm sandalwood tones.',
+    color: 'Maroon',
+    stock: 20,
+  },
+  {
+    id: 'DM-005',
+    sku: 'ZAR-WHT-02',
+    name: 'Classic Linen Shirt — Beige',
+    category: 'Shirts',
+    price: 1299,
+    mrp: 1999,
+    rating: 4.5,
+    badge: '',
+    image:
+      'https://images.unsplash.com/photo-1596755094514-f87e34085b2c?w=700&q=80&auto=format&fit=crop',
+    description: 'Breathable linen shirt with a modern tailored cut.',
+    color: 'White',
+    stock: 28,
+  },
+  {
+    id: 'DM-006',
+    sku: 'ZAR-BLU-01',
+    name: 'Denim Trucker Jacket',
+    category: 'Jackets',
+    price: 1999,
+    mrp: 2999,
+    rating: 4.7,
+    badge: 'Limited',
+    image:
+      'https://images.unsplash.com/photo-1576995853123-5a10305d93c0?w=700&q=80&auto=format&fit=crop',
+    description: 'Washed denim trucker with brass buttons. Built to last.',
+    color: 'Blue',
+    stock: 15,
+  },
+  {
+    id: 'DM-007',
+    sku: 'ZAR-RED-02',
+    name: 'Floral Summer Dress',
+    category: 'Dresses',
+    price: 1599,
+    mrp: 2499,
+    rating: 4.8,
+    badge: 'New',
+    image:
+      'https://images.unsplash.com/photo-1595777457583-95e059d581b8?w=700&q=80&auto=format&fit=crop',
+    description: 'Breezy floral midi — wear your vibe all summer.',
+    color: 'Red',
+    stock: 25,
+  },
+  {
+    id: 'DM-008',
+    sku: 'ZAR-MRN-02',
+    name: 'Essential Hoodie — Espresso',
+    category: 'Hoodies',
+    price: 1399,
+    mrp: 2199,
+    rating: 4.6,
+    badge: '',
+    image:
+      'https://images.unsplash.com/photo-1556821840-3a63f95609a7?w=700&q=80&auto=format&fit=crop',
+    description: 'Brushed-fleece hoodie in deep espresso brown.',
+    color: 'Maroon',
+    stock: 30,
+  },
+];
+
+// The 5 T-Shirt color filters (single source of truth for storefront,
+// admin form select, and api validation). `hex` = swatch, `soft` = card tint.
+export const COLOR_OPTIONS = ['Maroon', 'Red', 'Black', 'White', 'Blue'];
+
+export const COLOR_FILTERS = [
+  { title: 'Maroon', hex: '#6d1a2d', soft: '#f5e3e7', dark: true },
+  { title: 'Red', hex: '#c1272d', soft: '#fbe4e4', dark: true },
+  { title: 'Black', hex: '#1c1a18', soft: '#e8e6e3', dark: true },
+  { title: 'White', hex: '#f5f2ec', soft: '#faf8f3', dark: false },
+  { title: 'Blue', hex: '#1e4fa3', soft: '#e2ebfa', dark: true },
+];
+
+/** Case-insensitive color match used by the storefront filter. */
+export const matchColor = (product, color) => {
+  if (!color || color === 'All') return true;
+  return String(product?.color || '').trim().toLowerCase() === String(color).trim().toLowerCase();
+};
+
+/**
+ * Gallery images for a product (max 3: Main / Design Detail / Logo-Tag).
+ * Accepts the `images` array; falls back to the legacy single `image`.
+ * Guarantees at least 1 safe default so the carousel never renders empty.
+ */
+export const PLACEHOLDER_IMG =
+  'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?w=800';
+
+/**
+ * Accept ANY non-empty string as a valid image source.
+ * - Relative paths (e.g. "images/products/tshirt.jpg") — kept for storefront
+ * - Blob URLs (e.g. "blob:http://example.com/...") — handled by browser
+ * - Standard http(s) URLs — kept as-is
+ * - Base64 data URLs — rejected to prevent WhatsApp URL blowup → 4xx
+ * - Empty/null — rejected
+ */
+export function isValidImageSrc(src) {
+  if (!src) return false;
+  if (typeof src === 'string') return src.trim().length > 0;
+  if (typeof src === 'object') return true; // Accept File / Blob objects directly
+  return false;
+}
+
+export const getImages = (p) => {
+  // Prefer the array; else split a (possibly comma-joined) image string.
+  // splitImageString() is defined below — resolved at call time.
+  const raw =
+    Array.isArray(p?.images) && p.images.length
+      ? p.images
+      : p?.image
+        ? splitImageString(p.image)
+        : [];
+  // Drop missing/broken/invalid slots BEFORE falling back.
+  const clean = raw.filter(isValidImageSrc).slice(0, 3);
+  return clean.length ? clean : [PLACEHOLDER_IMG];
+};
+
+/**
+ * Storefront gallery: ALWAYS 3 views — missing View 2/3 duplicate View 1
+ * so all 3 navigation dots function smoothly. (Edit forms must use the
+ * unpadded getImages() so placeholders never get persisted as real views.)
+ */
+export const getGallery = (p) => {
+  const base = [...getImages(p)];
+  while (base.length < 3) base.push(base[0]);
+  return base.slice(0, 3);
+};
+
+/**
+ * Safe single-image source for thumbnails OUTSIDE the carousel
+ * (cart/wishlist/search/admin table). NEVER render `p.image` directly —
+ * it may hold the comma-joined transport string.
+ */
+export const firstImage = (p) => getImages(p)[0];
+
+/**
+ * Split a comma-joined image string WITHOUT breaking data URLs
+ * (whose `;base64,` prefix contains a comma). Base64 payloads never
+ * contain commas, so the data-URL alternative matches them whole.
+ */
+export const splitImageString = (str) => {
+  const t = String(str || '').trim();
+  if (!t) return [];
+  if (t.startsWith('[')) {
+    try {
+      const arr = JSON.parse(t);
+      if (Array.isArray(arr)) {
+        return arr.map((s) => String(s || '').trim()).filter(Boolean).slice(0, 3);
+      }
+    } catch {
+      /* fall through to delimiter split */
+    }
+  }
+  const parts = t.match(/data:image\/[a-zA-Z+]+;base64,[^,]+|[^,]+/g) || [];
+  return parts.map((s) => s.trim()).filter(Boolean).slice(0, 3);
+};
+
+// Canonical admin Type values (form dropdown) — tolerant of legacy rows
+// stored as "T-Shirts", so old Sheet data keeps filtering correctly.
+export const TYPE_OPTIONS = ['T-Shirt', 'Oversized'];
+
+const normType = (s) =>
+  String(s || '').toLowerCase().replace(/[^a-z]/g, '').replace(/s$/, '');
+
+/** Type match for the ALL / T-SHIRTS / OVERSIZED pills. */
+export const matchType = (product, filter) => {
+  if (!filter || filter === 'All') return true;
+  return normType(product?.category) === normType(filter);
+};
+
+/** Consistent display label regardless of stored variant. */
+export const typeLabel = (category) => {
+  const n = normType(category);
+  if (n === 't-shirt') return 'T-Shirts';
+  if (n === 'oversized') return 'Oversized';
+  return category;
+};
+
+// Hero slides — LOCAL banners in /public (banner1/2/3.jpg).
+// Served by Vite at site root: "/banner1.jpg". No external links.
+export const HERO_SLIDES = [
+  {
+    eyebrow: 'Wear Your Vibe',
+    title: 'ZAREEF',
+    subtitle: 'CLOTHING STORE',
+    text: 'Premium quality. Modern style. Made for your everyday journey.',
+    image: '/banner1.jpg',
+    cta: 'Shop Now',
+  },
+  {
+    eyebrow: 'New Season Drop',
+    title: 'STREET ROYALE',
+    subtitle: 'FESTIVE EDIT 2026',
+    text: 'Bold graphics. Rich fabrics. Limited festive pieces.',
+    image: '/banner2.jpg',
+    cta: 'Explore Collection',
+  },
+  {
+    eyebrow: 'Premium Quality',
+    title: 'EVERYDAY LUXE',
+    subtitle: 'COTTON ESSENTIALS',
+    text: 'Heavyweight tees, linen shirts & timeless staples.',
+    image: '/banner3.jpg',
+    cta: 'Shop Essentials',
+  },
+];
