@@ -267,6 +267,21 @@ table.ad-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; min
 .wa-btn:hover { background: #1faa55; border-color: #1faa55; color: #fff; box-shadow: 0 0 16px rgba(31, 170, 85, 0.45); }
 .ad-empty { padding: 40px; text-align: center; color: var(--ad-muted); }
 
+/* Complete & delete order action in the Orders table */
+.ad-del-order {
+  background: transparent; border: 1px solid var(--ad-line); color: var(--ad-text);
+  padding: 7px 12px; border-radius: 8px; font-size: 0.76rem;
+  white-space: nowrap; transition: all 0.2s ease;
+}
+.ad-del-order:hover {
+  border-color: var(--ad-red); color: var(--ad-red);
+  background: rgba(248, 113, 113, 0.08);
+}
+.ad-del-order:disabled { opacity: 0.45; cursor: wait; }
+@media (max-width: 720px) {
+  .ad-del-order { padding: 7px 9px; font-size: 0.7rem; }
+}
+
 /* Instant SKU lookup result popup */
 .sku-hit {
   display: flex; align-items: center; gap: 16px;

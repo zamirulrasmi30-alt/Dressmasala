@@ -33,6 +33,7 @@
  *   POST { action:'product_add', product:{...} }                -> { ok, product }
  *   POST { action:'product_update', id, product:{...} }         -> { ok, product }
  *   POST { action:'product_delete', id }                       -> { ok:true }
+ *   POST { action:'order_delete', orderId }                    -> { ok:true }
  */
 
 var SHEET_PRODUCTS = 'Products';
@@ -111,6 +112,11 @@ function doPost(e) {
 
     if (body.action === 'product_delete' && body.id) {
       deleteProduct_(String(body.id));
+      return jsonOut({ ok: true });
+    }
+
+    if (body.action === 'order_delete' && body.orderId) {
+      deleteOrder_(String(body.orderId));
       return jsonOut({ ok: true });
     }
 
@@ -262,6 +268,18 @@ function deleteProduct_(id) {
   var values = sh.getDataRange().getValues();
   for (var r = values.length; r >= 2; r--) {
     if (String(values[r - 1][0]) === String(id)) {
+      sh.deleteRow(r);
+    }
+  }
+}
+
+// Removes the order row whose FIRST column (orderId) matches. Bottom-up
+// so repeated deleteRow() calls never shift the remaining indexes.
+function deleteOrder_(orderId) {
+  var sh = getSheet_(SHEET_ORDERS, ORDER_HEADERS);
+  var values = sh.getDataRange().getValues();
+  for (var r = values.length; r >= 2; r--) {
+    if (String(values[r - 1][0]) === String(orderId)) {
       sh.deleteRow(r);
     }
   }

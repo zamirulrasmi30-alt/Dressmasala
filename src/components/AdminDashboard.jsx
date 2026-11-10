@@ -4,11 +4,12 @@
 // - Overview: revenue / active orders / inventory metric cards,
 //   7-day revenue bars, low-stock alerts, recent orders.
 // - Products: full CRUD (title, price, MRP, category, image URL or file
-//   upload, description, stock, badge) synced through GAS_ENDPOINT.
+//   upload, description, badge) synced through GAS_ENDPOINT. Stock is not
+//   editable — every product is made to order (always in stock).
 // - Orders: live table from the GAS backend (fallback local).
 import React, { useMemo, useState } from 'react';
 import { COLOR_OPTIONS, COLOR_FILTERS, TYPE_OPTIONS, getImages, firstImage, PLACEHOLDER_IMG } from '../data/products.js';
-import { computeOverview, fileToDataUrl, inr, validateProduct } from '../services/api.js';
+import { MADE_TO_ORDER_STOCK, computeOverview, fileToDataUrl, inr, validateProduct } from '../services/api.js';
 import { customerWaLink } from '../services/order.js';
 import './Admin.css';
 
@@ -126,7 +127,7 @@ const EMPTY_FORM = {
   sku: '',
   images: ['', '', ''],
   description: '',
-  stock: '10',
+  // No stock field — products are always in stock (made to order).
   badge: '',
   rating: '4.5',
 };
@@ -180,6 +181,7 @@ export default function AdminDashboard({
   onCreate,
   onUpdate,
   onDelete,
+  onDeleteOrder = () => {},
   onRefresh,
   onExit,
   onLogout = () => {},
@@ -269,12 +271,17 @@ export default function AdminDashboard({
   };
 
   // Metrics follow the date filter: revenue / active / totals recompute
-  // from visibleOrders while inventory stays global.
-  const viewStats = useMemo(
-    () =>
-      preset === 'all' ? stats : computeOverview(products, visibleOrders, subscribers),
-    [preset, stats, products, visibleOrders, subscribers]
-  );
+  // from visibleOrders while inventory stays global. When there are NO
+  // real orders, every order metric defaults STRICTLY to 0 — ₹0 revenue,
+  // 0 orders, 0 active — nothing can inherit or invent a fallback number.
+  const viewStats = useMemo(() => {
+    const base =
+      preset === 'all' ? stats : computeOverview(products, visibleOrders, subscribers);
+    if (!base.totalOrders) {
+      return { ...base, revenue: 0, totalOrders: 0, activeOrders: 0 };
+    }
+    return base;
+  }, [preset, stats, products, visibleOrders, subscribers]);
 
   const flash = (msg) => {
     setNotice(msg);
@@ -360,7 +367,7 @@ export default function AdminDashboard({
       category: p.category, color: p.color ?? '', sku: p.sku ?? '',
       images: [...getImages(p), '', '', ''].slice(0, 3),
       description: p.description ?? '',
-      stock: String(p.stock ?? 0), badge: p.badge ?? '', rating: String(p.rating ?? 4.5),
+      badge: p.badge ?? '', rating: String(p.rating ?? 4.5),
     });
     setFormErr('');
     setShowForm(true);
@@ -435,6 +442,26 @@ export default function AdminDashboard({
     if (!window.confirm(`Delete “${p.name}” permanently?`)) return;
     await onDelete(p.id);
     flash(`“${p.name}” deleted.`);
+  };
+
+  // Complete & delete an order — clears a finished delivery from the
+  // Orders tab (Sheets) and the offline cache in one confirm.
+  const askDeleteOrder = async (o) => {
+    if (
+      !window.confirm(
+        `Mark order ${o.orderId} as COMPLETE and delete it permanently?\n\nThis also removes it from the Google Sheets Orders tab — metrics and revenue will recompute without it.`
+      )
+    )
+      return;
+    setBusy(true);
+    try {
+      await onDeleteOrder(o.orderId);
+      flash(`Order ${o.orderId} completed & cleared.`);
+    } catch (ex) {
+      flash(`Could not clear ${o.orderId} — ${ex.message}`);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const goTab = (id) => {
@@ -568,7 +595,11 @@ export default function AdminDashboard({
               <div className="ad-card">
                 <span>Inventory</span>
                 <strong>{stats.productCount}</strong>
-                <em>{stats.units} units in stock</em>
+                <em>
+                  {stats.madeToOrder === stats.productCount && stats.productCount > 0
+                    ? 'Every piece made to order ♛'
+                    : `${stats.units} units in stock`}
+                </em>
                 <span className="ad-metric-ico">{METRIC_ICONS.inventory}</span>
               </div>
             </div>
@@ -661,7 +692,9 @@ export default function AdminDashboard({
                   <small>
                     {skuHit.sku} · {inr(skuHit.price)} ·{' '}
                     <span className={Number(skuHit.stock) <= 5 ? 'low' : ''}>
-                      {skuHit.stock} in stock
+                      {Number(skuHit.stock) >= MADE_TO_ORDER_STOCK
+                        ? 'Made to order'
+                        : `${skuHit.stock} in stock`}
                     </span>
                   </small>
                 </div>
@@ -737,7 +770,15 @@ export default function AdminDashboard({
                           <s>{inr(p.mrp)}</s>
                         </small>
                       </td>
-                      <td>{p.stock}</td>
+                      <td>
+                        {Number(p.stock) >= MADE_TO_ORDER_STOCK ? (
+                          <span style={{ color: 'var(--ad-muted)', fontSize: '.8rem', whiteSpace: 'nowrap' }}>
+                            Made to order ♛
+                          </span>
+                        ) : (
+                          p.stock
+                        )}
+                      </td>
                       <td>
                         <div className="row-actions">
                           <button onClick={() => openEdit(p)}>Edit</button>
@@ -775,6 +816,7 @@ export default function AdminDashboard({
                     <th>Total</th>
                     <th>Status</th>
                     <th>Notify</th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -817,11 +859,21 @@ export default function AdminDashboard({
                             );
                           })()}
                         </td>
+                        <td>
+                          <button
+                            className="ad-del-order"
+                            title="Complete & delete this order (removes it from Sheets)"
+                            disabled={busy}
+                            onClick={() => askDeleteOrder(o)}
+                          >
+                            ✓ Complete &amp; Delete
+                          </button>
+                        </td>
                       </tr>
                     ))}
                   {visibleOrders.length === 0 && (
                     <tr>
-                      <td colSpan={5} className="ad-empty">
+                      <td colSpan={7} className="ad-empty">
                         No orders received on this date.
                       </td>
                     </tr>
@@ -887,14 +939,16 @@ export default function AdminDashboard({
                   </select>
                 </div>
                 <div className="ad-field">
-                  <label htmlFor="pf-stock">Stock *</label>
-                  <input
-                    id="pf-stock"
-                    type="number"
-                    min="0"
-                    value={form.stock}
-                    onChange={(e) => setForm({ ...form, stock: e.target.value })}
-                  />
+                  <label>Stock</label>
+                  <p
+                    style={{
+                      margin: '10px 0 0', padding: '13px 15px',
+                      border: '1px dashed var(--ad-line)', borderRadius: 10,
+                      fontSize: '.85rem', color: 'var(--ad-muted)',
+                    }}
+                  >
+                    Made to order — always in stock ♛
+                  </p>
                 </div>
                 <div className="ad-field">
                   <label htmlFor="pf-color">Color *</label>

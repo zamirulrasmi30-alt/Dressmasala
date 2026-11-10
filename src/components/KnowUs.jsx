@@ -108,6 +108,27 @@ export function AboutUs() {
           </div>
         </div>
       </div>
+
+      {/* Founder & sponsor — bottom of About */}
+      <div className="people">
+        <p className="eyebrow" style={{ color: 'var(--accent-hover)' }}>
+          The People Behind Zareef
+        </p>
+        <div className="people-grid">
+          <div className="people-card">
+            <span className="people-avatar" aria-hidden>♛</span>
+            <span className="people-role">Founder</span>
+            <strong className="people-name">A. SYED SAFEEK</strong>
+            <p className="people-note">The vision driving every stitch we ship.</p>
+          </div>
+          <div className="people-card">
+            <span className="people-avatar" aria-hidden>🤝</span>
+            <span className="people-role">Sponsored By</span>
+            <strong className="people-name">LUCKY BOYS</strong>
+            <p className="people-note">Backed with belief from day one.</p>
+          </div>
+        </div>
+      </div>
     </section>
   );
 }

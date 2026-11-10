@@ -29,6 +29,7 @@ import {
 } from './services/order.js';
 import {
   createProduct,
+  deleteOrder,
   deleteProduct,
   fetchOrders,
   fetchProducts,
@@ -193,6 +194,15 @@ export default function App() {
   const handleDelete = async (id) => {
     await deleteProduct(id);
     setProducts((prev) => prev.filter((p) => p.id !== id));
+  };
+
+  // Clear an order (completed delivery): delete from Sheet/local cache
+  // FIRST (inside deleteOrder), then drop it from shared state so the
+  // admin list AND overview metrics recompute without it.
+  const handleOrderDelete = async (orderId) => {
+    await deleteOrder(orderId);
+    setOrders((prev) => prev.filter((o) => o.orderId !== orderId));
+    return true;
   };
 
   const exitAdmin = () => {
@@ -384,6 +394,7 @@ export default function App() {
         onCreate={handleCreate}
         onUpdate={handleUpdate}
         onDelete={handleDelete}
+        onDeleteOrder={handleOrderDelete}
         onRefresh={loadAll}
         onExit={exitAdmin}
         onLogout={handleLogout}

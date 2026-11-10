@@ -3,6 +3,8 @@
 // and used offline if the GAS endpoint is not configured yet.
 // Keep field names 1:1 with the Google Sheet columns (see gas/Code.gs).
 // Image URLs use Unsplash (free) so the project runs with zero assets.
+// stock: 999 = MADE TO ORDER sentinel (always in stock — see
+// MADE_TO_ORDER_STOCK in services/api.js).
 // ------------------------------------------------------------------
 
 export const FALLBACK_PRODUCTS = [
@@ -19,7 +21,7 @@ export const FALLBACK_PRODUCTS = [
       'https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?w=700&q=80&auto=format&fit=crop',
     description: 'Premium cotton tee with vibrant rose graphic. Everyday comfort fit.',
     color: 'Red',
-    stock: 42,
+    stock: 999,
   },
   {
     id: 'DM-002',
@@ -34,7 +36,7 @@ export const FALLBACK_PRODUCTS = [
       'https://images.unsplash.com/photo-1583743814966-8936f5b7be1a?w=700&q=80&auto=format&fit=crop',
     description: 'Heavyweight 220 GSM pure-cotton white tee. Made for your everyday journey.',
     color: 'White',
-    stock: 60,
+    stock: 999,
   },
   {
     id: 'DM-003',
@@ -49,7 +51,7 @@ export const FALLBACK_PRODUCTS = [
       'https://images.unsplash.com/photo-1503341504253-dff4815485f1?w=700&q=80&auto=format&fit=crop',
     description: 'Drop-shoulder oversized fit with boxy streetwear silhouette.',
     color: 'Black',
-    stock: 35,
+    stock: 999,
   },
   {
     id: 'DM-004',
@@ -65,7 +67,7 @@ export const FALLBACK_PRODUCTS = [
       'https://images.unsplash.com/photo-1597983073493-88cd35cf93b0?w=700&q=80&auto=format&fit=crop',
     description: 'Hand-finished festive kurta in warm sandalwood tones.',
     color: 'Maroon',
-    stock: 20,
+    stock: 999,
   },
   {
     id: 'DM-005',
@@ -80,7 +82,7 @@ export const FALLBACK_PRODUCTS = [
       'https://images.unsplash.com/photo-1596755094514-f87e34085b2c?w=700&q=80&auto=format&fit=crop',
     description: 'Breathable linen shirt with a modern tailored cut.',
     color: 'White',
-    stock: 28,
+    stock: 999,
   },
   {
     id: 'DM-006',
@@ -95,7 +97,7 @@ export const FALLBACK_PRODUCTS = [
       'https://images.unsplash.com/photo-1576995853123-5a10305d93c0?w=700&q=80&auto=format&fit=crop',
     description: 'Washed denim trucker with brass buttons. Built to last.',
     color: 'Blue',
-    stock: 15,
+    stock: 999,
   },
   {
     id: 'DM-007',
@@ -110,7 +112,7 @@ export const FALLBACK_PRODUCTS = [
       'https://images.unsplash.com/photo-1595777457583-95e059d581b8?w=700&q=80&auto=format&fit=crop',
     description: 'Breezy floral midi — wear your vibe all summer.',
     color: 'Red',
-    stock: 25,
+    stock: 999,
   },
   {
     id: 'DM-008',
@@ -125,7 +127,7 @@ export const FALLBACK_PRODUCTS = [
       'https://images.unsplash.com/photo-1556821840-3a63f95609a7?w=700&q=80&auto=format&fit=crop',
     description: 'Brushed-fleece hoodie in deep espresso brown.',
     color: 'Maroon',
-    stock: 30,
+    stock: 999,
   },
 ];
 

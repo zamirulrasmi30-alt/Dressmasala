@@ -22,10 +22,24 @@ export const isGasConfigured = () => !GAS_ENDPOINT.includes('PASTE_YOUR');
 
 const LS = {
   products: 'dm_products',
-  orders: 'dm_orders',
+  // v2 — fresh order cache. The dashboard must launch at 0 orders / ₹0
+  // revenue; the legacy 'dm_orders' key (from the demo-seed era) is
+  // deleted on boot below and never read again.
+  orders: 'dm_orders_v2',
   subscribers: 'dm_subscribers',
   messages: 'dm_messages',
 };
+
+// One-time boot cleanup: erase every trace of the demo order cache and
+// dead keys so the fresh launch carries no legacy state whatsoever.
+(function purgeLegacyStorage() {
+  try {
+    localStorage.removeItem('dm_orders'); // demo-seed era order cache
+    localStorage.removeItem('dm_offer_ends'); // removed Festive Sale hook
+  } catch {
+    /* storage blocked — nothing persisted, nothing to purge */
+  }
+})();
 
 function lsGet(key, fallback) {
   try {
@@ -132,28 +146,18 @@ function localProducts() {
   return merged;
 }
 
-// Seed demo orders once so the admin overview looks alive offline.
-function seedOrders() {
-  return [
-    {
-      orderId: 'DM-ORD-DEMO1',
-      date: new Date(Date.now() - 86400000).toISOString(),
-      items: 'Passion Rose Graphic Tee x1',
-      total: 799,
-      name: 'Aarav Sharma',
-      phone: '+91 98111 22233',
-      status: 'Shipped',
-    },
-    {
-      orderId: 'DM-ORD-DEMO2',
-      date: new Date(Date.now() - 2 * 86400000).toISOString(),
-      items: 'Floral Summer Dress x1, Essential Hoodie x1',
-      total: 2998,
-      name: 'Diya Patel',
-      phone: '+91 98222 33344',
-      status: 'Processing',
-    },
-  ];
+// Orders start CLEAN — there is no demo order seed. The admin overview
+// (Total Revenue, Active Orders, lifetime stats, revenue chart) computes
+// exclusively from REAL orders placed through checkout / the Orders tab.
+// DM-ORD-DEMO* rows cached by earlier demo builds are purged on every
+// read so old demo totals (₹799 + ₹2,998, 2 fake orders) can never
+// resurface in the metrics.
+const DEMO_ORDER_KEY = /^DM-ORD-DEMO/i;
+
+function cleanOrders(list) {
+  return (Array.isArray(list) ? list : []).filter(
+    (o) => o && !DEMO_ORDER_KEY.test(String(o.orderId || ''))
+  );
 }
 
 /* ---------------- low-level GAS transport ---------------- */
@@ -296,7 +300,9 @@ function normaliseRow(row, i) {
     images,
     description: String(row.description ?? row.Description ?? ''),
     color: String(row.color ?? row.Color ?? '').trim(),
-    stock: Number(row.stock ?? row.Stock ?? 10),
+    // Made-to-order: the legacy Sheet stock column (if any) is ignored —
+    // every product normalises to the always-in-stock sentinel.
+    stock: MADE_TO_ORDER_STOCK,
   };
 }
 
@@ -349,13 +355,18 @@ export async function fetchProducts({ timeoutMs = 20000 } = {}) {
 }
 
 /** Validate the admin product form. Returns an error string or ''. */
+// Every product is MADE TO ORDER — there is no finite inventory to track.
+// Any product carrying this stock sentinel is displayed as "Made to order"
+// instead of a raw count, and never triggers low-stock alerts.
+export const MADE_TO_ORDER_STOCK = 999;
+
 export function validateProduct(p) {
   if (!p.name?.trim()) return 'Title is required.';
   if (!(Number(p.price) > 0)) return 'Price must be greater than 0.';
   if (!p.category?.trim()) return 'Please select a Type (T-Shirt / Oversized).';
   if (!COLOR_OPTIONS.includes(p.color)) return 'Please select a Color (Maroon, Red, Black, White, Blue).';
   if (!primaryImage(p).primary) return 'A valid Main Image is required (URL or uploaded file).';
-  if (!(Number(p.stock) >= 0)) return 'Stock cannot be negative.';
+  // No stock validation — products are always in stock (made to order).
   return '';
 }
 
@@ -382,7 +393,9 @@ export async function createProduct(data) {
     // deployment (single image column) keeps View 2 + View 3 intact.
     image: images.join(',') || primary,
     images,
-    stock: Number(data.stock),
+    // Made-to-order: every product persists with the always-in-stock
+    // sentinel, so it never drops below the low-stock threshold.
+    stock: MADE_TO_ORDER_STOCK,
   };
   if (!isGasConfigured()) {
     const list = [product, ...localProducts()];
@@ -426,7 +439,9 @@ export async function updateProduct(id, data) {
     color: String(data.color || '').trim(),
     image: images.join(',') || primary,
     images,
-    stock: Number(data.stock),
+    // Made-to-order: edits also pin the always-in-stock sentinel, keeping
+    // every product below the low-stock threshold permanently excluded.
+    stock: MADE_TO_ORDER_STOCK,
   };
   // Mirror the edit into the offline cache. Without this, a successful GAS
   // write followed by a failed/slow storefront refetch would fall back to
@@ -565,15 +580,49 @@ export function fileToDataUrl(file) {
 /* ---------------- orders & subscribers (admin) ---------------- */
 
 export async function fetchOrders() {
-  const local = lsGet(LS.orders, null) || seedOrders();
+  // Clean read + one-time purge of legacy demo rows from older caches.
+  const local = cleanOrders(lsGet(LS.orders, null));
   lsSet(LS.orders, local);
   if (!isGasConfigured()) return { orders: local, source: 'fallback' };
   try {
     const json = await gasGet('orders');
-    const rows = Array.isArray(json) ? json : json.orders || json.data || [];
+    const rows = cleanOrders(Array.isArray(json) ? json : json.orders || json.data || []);
+    if (rows.length) {
+      // Mirror Sheet truth into the offline cache so health-checked
+      // deletes stay deleted even after a later fallback refetch.
+      lsSet(LS.orders, rows);
+    }
     return { orders: rows.length ? rows : local, source: rows.length ? 'gas' : 'fallback' };
   } catch (e) {
     return { orders: local, source: 'fallback', error: e.message };
+  }
+}
+
+/**
+ * Delete an order (GAS → local fallback). Keyed by orderId — used by the
+ * admin Orders table to clear fully delivered/completed orders.
+ * Mirrors deleteProduct(): purge the offline cache in EVERY path so the
+ * cleared order cannot resurrect from a stale fallback refetch, and treat
+ * an explicit ok:false (HTTP 200) as a Sheet-write failure.
+ */
+export async function deleteOrder(orderId) {
+  const purge = () =>
+    lsSet(
+      LS.orders,
+      cleanOrders(lsGet(LS.orders, [])).filter((o) => o.orderId !== orderId)
+    );
+  if (!isGasConfigured()) {
+    purge();
+    return { ok: true, source: 'fallback' };
+  }
+  try {
+    const res = await gasPost({ action: 'order_delete', orderId });
+    if (res && res.ok === false) throw new Error(res.error || 'GAS rejected the order delete.');
+    purge();
+    return { ok: true, source: 'gas' };
+  } catch (e) {
+    purge();
+    return { ok: true, source: 'fallback', error: e.message };
   }
 }
 
@@ -605,7 +654,7 @@ export async function placeOrder(order) {
     status: 'Processing',
     ...order,
   };
-  lsSet(LS.orders, [record, ...lsGet(LS.orders, seedOrders())]);
+  lsSet(LS.orders, [record, ...cleanOrders(lsGet(LS.orders, []))]);
   if (!isGasConfigured()) return { ok: true, orderId: record.orderId, source: 'fallback' };
   try {
     const res = await gasPost({ action: 'order', ...record });
@@ -728,14 +777,23 @@ export async function sendWeb3Form({ name, email, message }) {
 export function computeOverview(products, orders, subscribers) {
   const revenue = orders.reduce((s, o) => s + (Number(o.total) || 0), 0);
   const active = orders.filter((o) => !/deliver|cancel/i.test(String(o.status))).length;
-  const units = products.reduce((s, p) => s + (Number(p.stock) || 0), 0);
-  const lowStock = products.filter((p) => Number(p.stock) <= 5);
+  const units = products.reduce(
+    // Made-to-order products (sentinel stock) carry no finite inventory —
+    // exclude them from the unit count so the number stays meaningful.
+    (s, p) => s + (Number(p.stock) < MADE_TO_ORDER_STOCK ? Number(p.stock) || 0 : 0),
+    0
+  );
+  const madeToOrder = products.filter((p) => Number(p.stock) >= MADE_TO_ORDER_STOCK).length;
+  const lowStock = products.filter(
+    (p) => Number(p.stock) < MADE_TO_ORDER_STOCK && Number(p.stock) <= 5
+  );
   return {
     revenue,
     totalOrders: orders.length,
     activeOrders: active,
     productCount: products.length,
     units,
+    madeToOrder,
     subscriberCount: subscribers.length,
     lowStock,
   };

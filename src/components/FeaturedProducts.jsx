@@ -5,7 +5,7 @@ import React, { useState } from 'react';
 import { COLOR_FILTERS, matchColor, matchType, typeLabel } from '../data/products.js';
 import { DEFAULT_SIZE, SIZES } from '../services/order.js';
 import ProductMedia from './ProductMedia.jsx';
-import { inr } from '../services/api.js';
+import { inr, MADE_TO_ORDER_STOCK } from '../services/api.js';
 import './Sections.css';
 
 const hexOf = (color) =>
@@ -121,7 +121,12 @@ export default function FeaturedProducts({
                       {p.color ? ` · ${p.color}` : ''}
                     </span>
                     <h3 className="card-name">{p.name}</h3>
-                    <span className="card-rating">★ {p.rating} · {p.stock} in stock</span>
+                    <span className="card-rating">
+                      ★ {p.rating} ·{' '}
+                      {Number(p.stock) >= MADE_TO_ORDER_STOCK
+                        ? 'Made to order ✓'
+                        : `${p.stock} in stock`}
+                    </span>
                     <div className="card-price">
                       <strong>{inr(price)}</strong>
                       {showMrp && (
