@@ -1,5 +1,5 @@
 // Slide-out Cart + Wishlist drawers.
-// Cart: grouped lines with qty steppers, free-shipping progress, and a
+// Cart: grouped lines with qty steppers and a checkout handoff.
 // name/phone checkout that records the order via GAS (placeOrder).
 // Wishlist: liked items with move-to-bag. Escape closes either drawer.
 import React, { useEffect } from 'react';
@@ -7,8 +7,6 @@ import { inr } from '../services/api.js';
 import { firstImage } from '../data/products.js';
 import { SIZES } from '../services/order.js';
 import './Drawers.css';
-
-const FREE_SHIP_AT = 999;
 
 function useEscape(open, onClose) {
   useEffect(() => {
@@ -26,10 +24,11 @@ export function CartDrawer({ open, lines, onClose, onInc, onDec, onRemove, onSiz
 
   if (!open) return null;
 
+  // Total = item price × quantity ONLY — no shipping fee, no taxes.
+  // Mirrors checkoutTotal in App.jsx so bag, checkout and the WhatsApp
+  // receipt always show the identical amount.
   const total = lines.reduce((s, l) => s + l.product.price * l.qty, 0);
   const count = lines.reduce((s, l) => s + l.qty, 0);
-  const shipPct = Math.min(100, Math.round((total / FREE_SHIP_AT) * 100));
-  const shipping = total === 0 || total >= FREE_SHIP_AT ? 0 : 79;
 
   return (
     <>
@@ -53,16 +52,6 @@ export function CartDrawer({ open, lines, onClose, onInc, onDec, onRemove, onSiz
           </div>
         ) : (
           <>
-            <div className="ship-bar">
-              {total >= FREE_SHIP_AT ? (
-                <>🎉 You&apos;ve unlocked <strong>FREE shipping!</strong></>
-              ) : (
-                <>Add {inr(FREE_SHIP_AT - total)} more for <strong>FREE shipping</strong></>
-              )}
-              <div className="ship-track">
-                <div className="ship-fill" style={{ width: `${shipPct}%` }} />
-              </div>
-            </div>
             <div className="drawer-lines">
               {lines.map(({ product: p, size, qty }) => (
                 <div className="drawer-line" key={`${p.id}__${size}`}>
@@ -99,17 +88,9 @@ export function CartDrawer({ open, lines, onClose, onInc, onDec, onRemove, onSiz
               ))}
             </div>
             <div className="drawer-foot">
-              <div className="total-row">
-                <span>Subtotal</span>
-                <span>{inr(total)}</span>
-              </div>
-              <div className="total-row">
-                <span>Shipping</span>
-                <span>{shipping === 0 ? 'FREE' : inr(shipping)}</span>
-              </div>
               <div className="total-row grand">
                 <span>Total</span>
-                <span>{inr(total + shipping)}</span>
+                <span>{inr(total)}</span>
               </div>
               <button className="btn btn-dark" onClick={onCheckout} style={{ width: '100%' }}>
                 Proceed to Checkout →

@@ -289,14 +289,17 @@ export default function App() {
     );
   };
 
-  // WhatsApp checkout: validate �+' receipt + GAS sync + instant admin update.
+  // WhatsApp checkout: validate → receipt + GAS sync + instant admin update.
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   // Direct-buy lines (ORDER NOW) override the bag at checkout; null = use bag.
   const [directLines, setDirectLines] = useState(null);
   const checkoutLines = directLines ?? lines;
-  const checkoutTotal =
-    checkoutLines.reduce((s, l) => s + l.product.price * l.qty, 0) +
-    (checkoutLines.reduce((s, l) => s + l.product.price * l.qty, 0) >= 999 || checkoutLines.length === 0 ? 0 : 79);
+  // Total = item price × quantity ONLY. No shipping fee, no taxes, no
+  // surcharges — the amount sent to WhatsApp must match exactly.
+  const checkoutTotal = checkoutLines.reduce(
+    (s, l) => s + l.product.price * l.qty,
+    0
+  );
 
   // ORDER NOW: single item/size straight to the checkout modal (bag untouched).
   const handleOrderNow = (p, size) => {
